@@ -22,9 +22,9 @@
 *         :   HTran -<listen|tran|slave> <option> [-log logfile]                     *
 *         :                                                                          *
 *         : [option:]                                                                *
-*         :   -listen <ConnectPort> <TransmitPort>                                   *
-*         :   -tran   <ConnectPort> <TransmitHost> <TransmitPort>                    *
-*         :   -slave  <ConnectHost> <ConnectPort> <TransmitHost> <TransmitPort>      *
+*         :   -listen <PassivePort> <ListenPort>                                     *
+*         :   -tran   <ListenPort> <DestHost> <DestPort>                             *
+*         :   -slave  <DestHost> <DestPort> <ActiveHost> <ActivePort>                *
 *                                                                                    *
 *************************************************************************************/
 
@@ -112,7 +112,7 @@ int client_connect(int sockfd, char* server, int port);
 extern int errno;
 FILE *fp;
 int method = 0;
-int connectnum=0;
+volatile unsigned int connectnum = 0;
 
 /*************************************************************************************
 *                                                                                    *
@@ -122,7 +122,7 @@ int connectnum=0;
 int main(int argc, char* argv[]) {
     char **p;
     char sConnectHost[HOSTLEN], sTransmitHost[HOSTLEN];
-    int iConnectPort = 0, iTransmitPort = 0;
+    int  iConnectPort = 0, iTransmitPort = 0;
     char *logfile = NULL;
 
     ver();
@@ -141,18 +141,15 @@ int main(int argc, char* argv[]) {
             p++;
             continue;
         }
-
         p++;
     }
-
     if (logfile != NULL) {
-        fp = fopen(logfile, "a");
-        if (fp == NULL) {
+        if (NULL == (fp = fopen(logfile, "a"))) {
             printf("[-] ERROR: open logfile");
             return 0;
         }
         char s[] = "====== Start ======\r\n";
-        makelog(s, sizeof(s)/sizeof(char));
+        makelog(s, sizeof(s) / sizeof(char));
     }
 
 #ifdef WIN32
@@ -168,20 +165,18 @@ int main(int argc, char* argv[]) {
             iConnectPort = atoi(argv[2]);
             iTransmitPort = atoi(argv[3]);
             method = 1;
-        } else
-            if (stricmp(argv[1], "-tran") == 0 && argc >= 5) {
-                iConnectPort = atoi(argv[2]);
-                strncpy(sTransmitHost, argv[3], HOSTLEN);
-                iTransmitPort = atoi(argv[4]);
-                method = 2;
-            } else
-                if (stricmp(argv[1], "-slave") == 0 && argc >= 6) {
-                    strncpy(sConnectHost, argv[2], HOSTLEN);
-                    iConnectPort = atoi(argv[3]);
-                    strncpy(sTransmitHost, argv[4], HOSTLEN);
-                    iTransmitPort = atoi(argv[5]);
-                    method = 3;
-                }
+        } else if (stricmp(argv[1], "-tran") == 0 && argc >= 5) {
+            iConnectPort = atoi(argv[2]);
+            strncpy(sTransmitHost, argv[3], HOSTLEN);
+            iTransmitPort = atoi(argv[4]);
+            method = 2;
+        } else if (stricmp(argv[1], "-slave") == 0 && argc >= 6) {
+            strncpy(sConnectHost, argv[2], HOSTLEN);
+            iConnectPort = atoi(argv[3]);
+            strncpy(sTransmitHost, argv[4], HOSTLEN);
+            iTransmitPort = atoi(argv[5]);
+            method = 3;
+        }
     }
 
     switch (method) {
@@ -229,9 +224,9 @@ void usage(char* prog) {
     printf("[Usage of Packet Transmit:]\n\n");
     printf(" %s -<listen|tran|slave> <option> [-log logfile]\n\n", prog);
     printf("[option:]\n");
-    printf(" -listen <ConnectPort> <TransmitPort>\n");
-    printf(" -tran   <ConnectPort> <TransmitHost> <TransmitPort>\n");
-    printf(" -slave  <ConnectHost> <ConnectPort> <TransmitHost> <TransmitPort>\n\n");
+    printf(" -listen <PassivePort> <ListenPort>\n");
+    printf(" -tran   <ListenPort> <DestHost> <DestPort>\n");
+    printf(" -slave  <DestHost> <DestPort> <ActiveHost> <ActivePort>\n\n");
     return;
 }
 
@@ -302,7 +297,7 @@ transmitdata(LPVOID data) {
         port2 = ntohs(client2.sin_port);
     }
 
-    printf("[+] Start Transmit (%s:%d <-> %s:%d) ......\r\n\n", host1, port1, host2, port2);
+    printf("[+] Start Transmit (%s:%d <-> %s:%d) ......\r\n", host1, port1, host2, port2);
 
     maxfd = max(fd1, fd2) + 1;
     memset(read_in1, 0, MAXSIZE);
@@ -428,8 +423,8 @@ transmitdata(LPVOID data) {
 
     CLOSESOCKET(fd1);
     CLOSESOCKET(fd2);
-    //if(method == 3)
-    //    connectnum --;
+    if(method == 3)
+        --connectnum;
 
     printf("\r\n[+] OK! I Closed The Two Socket.\r\n");
 #ifdef WIN32
@@ -610,15 +605,15 @@ void conn2conn(char *host1, int port1, char *host2, int port2) {
     char   buffer[MAXSIZE];
 
     while (1) {
-        //while (connectnum) {
-        //    if (connectnum < CONNECTNUM) {
-        //        Sleep(10000);
-        //        break;
-        //    } else {
-        //        Sleep(TIMEOUT * 1000);
-        //        continue;
-        //    }
-        //}
+        while (connectnum) {
+            if (connectnum < CONNECTNUM) {
+                SLEEP(1000);
+                break;
+            } else {
+                SLEEP(TIMEOUT * 1000);
+                continue;
+            }
+        }
 
         if ((sockfd1 = create_socket()) == 0) return;
         if ((sockfd2 = create_socket()) == 0) return;
@@ -628,6 +623,7 @@ void conn2conn(char *host1, int port1, char *host2, int port2) {
         if (client_connect(sockfd1, host1, port1) == 0) {
             CLOSESOCKET(sockfd1);
             CLOSESOCKET(sockfd2);
+            SLEEP(3000);
             continue;
         }
 
@@ -638,9 +634,10 @@ void conn2conn(char *host1, int port1, char *host2, int port2) {
         while (1) {
             FD_ZERO(&fds);
             FD_SET(sockfd1, &fds);
-
             if (select(sockfd1 + 1, &fds, NULL, NULL, NULL) == SOCKET_ERROR) {
-                if (errno == WSAEINTR) continue;
+                if (errno == WSAEINTR) {
+                    continue;
+                }
                 break;
             }
             if (FD_ISSET(sockfd1, &fds)) {
@@ -649,18 +646,18 @@ void conn2conn(char *host1, int port1, char *host2, int port2) {
             }
             SLEEP(5);
         }
-
         if (l <= 0) {
             printf("[-] There is a error...Create a new connection.\r\n");
             continue;
         }
+        printf("[+] Connect OK!\r\n");
         while (1) {
-            printf("[+] Connect OK!\r\n");
             printf("[+] Make a Connection to %s:%d....\r\n", host2, port2);
             fflush(stdout);
             if (client_connect(sockfd2, host2, port2) == 0) {
                 CLOSESOCKET(sockfd1);
                 CLOSESOCKET(sockfd2);
+                SLEEP(3000);
                 continue;
             }
 
@@ -691,10 +688,9 @@ void conn2conn(char *host1, int port1, char *host2, int port2) {
         }
 #endif //WIN32
 
-        //connectnum++;
-
+        ++connectnum;
         SLEEP(1000);
-        printf("[+] CreateThread OK!\r\n\n");
+        printf("[+] CreateThread OK!\r\n");
     }
 }
 
