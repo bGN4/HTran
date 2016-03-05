@@ -4,11 +4,12 @@
 *                                                                                    *
 * Copyright (C) 2000-2004 HUC All Rights Reserved.                                   *
 *                                                                                    *
-* Author  : lion                                                                     *
-*         : lion@cnhonker.net                                                        *
+* Author  : lion@cnhonker.net                                                        *
 *         : http://www.cnhonker.com                                                  *
 *         :                                                                          *
 * Notice  : Thx to bkbll (bkbll#cnhonker.net)                                        *
+*         : cross-platform support by bGN4                                           *
+*         : https://github.com/bGN4/HTran                                            *
 *         :                                                                          *
 * Date    : 2003-10-20                                                               *
 *         :                                                                          *
